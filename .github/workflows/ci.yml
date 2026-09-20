@@ -9,7 +9,6 @@ on:
   workflow_dispatch:
 
 env:
-  # Semua perintah MLflow memakai penyimpanan lokal yang sama di workspace runner
   MLFLOW_TRACKING_URI: file://${{ github.workspace }}/mlruns
   IMAGE_NAME: credit-scoring
 
@@ -61,20 +60,26 @@ jobs:
           name: mlruns
           path: mlruns
 
+      # `mlflow models build-docker` (MLflow 2.19.0) gagal karena template Dockerfile-nya memakai
+      # Python 3.9 dengan get-pip.py terbaru, sehingga image dibangun dari Dockerfile yang dibuat di sini.
       - name: Build Docker Model
         run: |
-          # `mlflow models build-docker` (MLflow 2.19.0) gagal karena template Dockerfile-nya memakai
-          # Python 3.9 dengan get-pip.py terbaru. Image dibangun dari Dockerfile sendiri.
           MODEL_DIR=$(python -c "
           import mlflow
           print(mlflow.artifacts.download_artifacts(artifact_uri='runs:/${RUN_ID}/model'))
           " | tail -n 1)
           echo "Direktori model: $MODEL_DIR"
-          ls -la "$MODEL_DIR"
           rm -rf docker-context
           mkdir -p docker-context
           cp -r "$MODEL_DIR" docker-context/model
-          cp MLProject/Dockerfile docker-context/Dockerfile
+          cat > docker-context/Dockerfile <<'EOF'
+          FROM python:3.12.7-slim
+          WORKDIR /opt/ml
+          RUN pip install --no-cache-dir mlflow==2.19.0 scikit-learn==1.6.0 pandas==2.2.3 numpy==2.2.1
+          COPY model/ /opt/ml/model/
+          EXPOSE 8080
+          CMD ["mlflow", "models", "serve", "-m", "/opt/ml/model", "-h", "0.0.0.0", "-p", "8080", "--env-manager", "local"]
+          EOF
           docker build -t "${IMAGE_NAME}" docker-context
 
       - name: Log in to Docker Hub
