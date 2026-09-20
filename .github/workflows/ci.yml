@@ -63,7 +63,19 @@ jobs:
 
       - name: Build Docker Model
         run: |
-          mlflow models build-docker -m "runs:/${RUN_ID}/model" -n "${IMAGE_NAME}"
+          # `mlflow models build-docker` (MLflow 2.19.0) gagal karena template Dockerfile-nya memakai
+          # Python 3.9 dengan get-pip.py terbaru. Image dibangun dari Dockerfile sendiri.
+          MODEL_DIR=$(python -c "
+          import mlflow
+          print(mlflow.artifacts.download_artifacts(artifact_uri='runs:/${RUN_ID}/model'))
+          " | tail -n 1)
+          echo "Direktori model: $MODEL_DIR"
+          ls -la "$MODEL_DIR"
+          rm -rf docker-context
+          mkdir -p docker-context
+          cp -r "$MODEL_DIR" docker-context/model
+          cp MLProject/Dockerfile docker-context/Dockerfile
+          docker build -t "${IMAGE_NAME}" docker-context
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
